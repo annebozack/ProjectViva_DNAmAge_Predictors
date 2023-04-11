@@ -1,0 +1,874 @@
+---
+title: "Project Viva: DNAm age performance and predictors"
+author: 
+  - name: "Anne Bozack"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+
+## Required Packages and functions
+```{r,warning=FALSE,message=FALSE,eval=FALSE}
+library(sas7bdat)
+library(knitr)
+library(dplyr)
+library(kableExtra)
+library(tidyverse)
+# BiocManager::install("GAprediction")
+library(GAprediction)
+library(psych)
+library(Metrics)
+library(GGally)
+library(scales)
+library(MASS)
+library(lmtest)
+library(sandwich)
+```
+
+## Load data
+```{r,warning=FALSE,message=FALSE,eval=FALSE}
+# Load data
+# ageAll = read.csv('ageAll_DNAmAge_predictorsManuscript.csv')[,-1]
+
+# Variables as factors
+ageAll$smk_preg2 = factor(ageAll$smk_preg2)
+ageAll$race_child2 = factor(ageAll$race_child2)
+ageAll$female_d = as.factor(ageAll$female_d)
+ageAll$coll_grad = as.factor(ageAll$coll_grad)
+ageAll$gt70k = as.factor(ageAll$gt70k)
+ageAll$preterm = factor(ageAll$preterm)
+
+# Create dataset for each timepoint
+datCord = ageAll[!is.na(ageAll$DNAmAge_cord),]
+datAge3 = ageAll[!is.na(ageAll$DNAmAge_age3),]
+datAge7 = ageAll[!is.na(ageAll$DNAmAge_age7),]
+datAll = ageAll[!is.na(ageAll$DNAmAge_cord) & !is.na(ageAll$DNAmAge_age3) & !is.na(ageAll$DNAmAge_age7),]
+```
+
+## Descriptive statistics (Table 1 and Supplemental Table S1)
+```{r,warning=FALSE,message=FALSE,eval=FALSE}
+# function to calcuating descriptive stats
+tableone = function(dat, contVars, factVars, title){
+    rows = c(contVars, (unlist(sapply(1:length(factVars), function(i) c(factVars[i], levels(as.factor(dat[[factVars[i]]])))))))
+    dfone = data.frame(matrix(ncol = 4, nrow = length(rows)))
+    dfone[,1] = rows
+    for (i in 1:length(contVars)){
+        dfone[i,1] = paste0(dfone[i,1], ', mean, (SD)')
+        dfone[i,2] = round(mean(dat[[contVars[i]]], na.rm = T), 2)
+        dfone[i,3] = round(sd(dat[[contVars[i]]], na.rm = T), 2)
+        dfone[i,4] = sum(is.na(dat[[contVars[i]]]))
+    }
+    rowN = length(contVars) + 1
+    for (i in 1:length(factVars)){
+        dfone[rowN,1] = paste0(dfone[rowN,1], ', n, (%)')
+        rowN = rowN + 1
+        for (j in 1:length(levels(as.factor(dat[[factVars[i]]])))){
+            dfone[rowN,2] = table(as.factor(dat[[factVars[i]]]))[j]
+            dfone[rowN,3] = round((table(as.factor(dat[[factVars[i]]]))/sum(!is.na(dat[[factVars[i]]])))[j]*100, 2)
+            dfone[rowN,4] = sum(is.na(dat[[factVars[i]]]))
+            rowN = rowN + 1
+        }
+    }
+    dfone = rbind(c(paste0(title, ' N = ', nrow(dat)), NA, NA, NA), dfone)
+    return(dfone)
+}
+
+# cord blood
+contVars = c('age_mom_enroll_d', 'bmi_mom_prepreg_d', 'gestage_wks_deliv_d', 'zvalue_bwt_gage_sex_d', 'GA_BohlinPred_wks', 'GA_BohlinPred_EAA_wks', 'GA_KnightPred_wks', 'GA_KnightPred_EAA_wks', 'DNAmAge_cord', 'AgeAccelerationResidual_cord', 'DNAmAgeSkinBloodClock_cord', 'DNAmAgeSkinBloodClockAdjAge_cord')
+factVars = c('coll_grad', 'smk_preg2', 'gt70k', 'female_d', 'race_child2', 'preterm')
+tab1_cord = tableone(datCord, contVars, factVars, 'Cord blood')
+colnames(tab1_cord) = c('Var', '', '', 'Missing')
+tab1_cord[is.na(tab1_cord)] = ''
+
+# early childhood
+contVars = c('age_mom_enroll_d', 'bmi_mom_prepreg_d', 'gestage_wks_deliv_d', 'zvalue_bwt_gage_sex_d', 'DNAmAge_age3', 'AgeAccelerationResidual_age3', 'DNAmAgeSkinBloodClock_age3', 'DNAmAgeSkinBloodClockAdjAge_age3')
+tab1_age3 = tableone(datAge3, contVars, factVars, 'Age 3')
+colnames(tab1_age3) = c('Var', '', '', 'Missing')
+tab1_age3[is.na(tab1_age3)] = ''
+
+# mid-childhood
+contVars = c('age_mom_enroll_d', 'bmi_mom_prepreg_d', 'gestage_wks_deliv_d', 'zvalue_bwt_gage_sex_d', 'DNAmAge_age7', 'AgeAccelerationResidual_age7', 'DNAmAgeSkinBloodClock_age7', 'DNAmAgeSkinBloodClockAdjAge_age7')
+tab1_age7 = tableone(datAge7, contVars, factVars, 'Age 7')
+colnames(tab1_age7) = c('Var', '', '', 'Missing')
+tab1_age7[is.na(tab1_age7)] = ''
+
+# all time points
+contVars = c('age_mom_enroll_d', 'bmi_mom_prepreg_d', 'gestage_wks_deliv_d', 'zvalue_bwt_gage_sex_d', 'GA_BohlinPred_wks', 'GA_BohlinPred_EAA_wks', 'GA_KnightPred_wks', 'GA_KnightPred_EAA_wks', 'DNAmAge_cord', 'AgeAccelerationResidual_cord', 'DNAmAgeSkinBloodClock_cord', 'DNAmAgeSkinBloodClockAdjAge_cord',
+    'DNAmAge_age3', 'AgeAccelerationResidual_age3', 'DNAmAgeSkinBloodClock_age3', 'DNAmAgeSkinBloodClockAdjAge_age3', 'DNAmAge_age7', 'AgeAccelerationResidual_age7', 'DNAmAgeSkinBloodClock_age7', 'DNAmAgeSkinBloodClockAdjAge_age7')
+tab1_all = tableone(datAll, contVars, factVars, 'All timepoints')
+
+# test for differences between mother-child pairs with data at all timepoints and data at birth
+tab1_all$p = NA
+
+tab1_all$p[2] = round(wilcox.test(datAll$age_mom_enroll_d, datCord$age_mom_enroll_d)$p.value, 3)
+tab1_all$p[3] = round(wilcox.test(datAll$bmi_mom_prepreg_d, datCord$bmi_mom_prepreg_d)$p.value, 3)
+tab1_all$p[4] = round(wilcox.test(datAll$gestage_wks_deliv_d, datCord$gestage_wks_deliv_d)$p.value, 3)
+tab1_all$p[5] = round(wilcox.test(datAll$zvalue_bwt_gage_sex_d, datCord$zvalue_bwt_gage_sex_d)$p.value, 3)
+tab1_all$p[6] = round(wilcox.test(datAll$GA_BohlinPred_wks, datCord$GA_BohlinPred_wks)$p.value, 3)
+tab1_all$p[7] = round(wilcox.test(datAll$GA_BohlinPred_EAA_wks, datCord$GA_BohlinPred_EAA_wks)$p.value, 3)
+tab1_all$p[8] = round(wilcox.test(datAll$GA_KnightPred_wks, datCord$GA_KnightPred_wks)$p.value, 3)
+tab1_all$p[9] = round(wilcox.test(datAll$GA_KnightPred_EAA_wks, datCord$GA_KnightPred_EAA_wks)$p.value, 3)
+tab1_all$p[10] = round(wilcox.test(datAll$DNAmAge_cord, datCord$DNAmAge_cord)$p.value, 3)
+tab1_all$p[11] = round(wilcox.test(datAll$AgeAccelerationResidual_cord, datCord$AgeAccelerationResidual_cord)$p.value, 3)
+tab1_all$p[12] = round(wilcox.test(datAll$DNAmAgeSkinBloodClock_cord, datCord$DNAmAgeSkinBloodClock_cord)$p.value, 3)
+tab1_all$p[13] = round(wilcox.test(datAll$DNAmAgeSkinBloodClockAdjAge_cord, datCord$DNAmAgeSkinBloodClockAdjAge_cord)$p.value, 3)
+tab1_all$p[14] = round(wilcox.test(datAll$DNAmAge_age3, datAge3$DNAmAge_age3)$p.value, 3)
+tab1_all$p[15] = round(wilcox.test(datAll$AgeAccelerationResidual_age3, datAge3$AgeAccelerationResidual_age3)$p.value, 3)
+tab1_all$p[16] = round(wilcox.test(datAll$DNAmAgeSkinBloodClock_age3, datAge3$DNAmAgeSkinBloodClock_age3)$p.value, 3)
+tab1_all$p[17] = round(wilcox.test(datAll$DNAmAgeSkinBloodClockAdjAge_age3, datAge3$DNAmAgeSkinBloodClockAdjAge_age3)$p.value, 3)
+tab1_all$p[18] = round(wilcox.test(datAll$DNAmAge_age7, datAge7$DNAmAge_age7)$p.value, 3)
+tab1_all$p[19] = round(wilcox.test(datAll$AgeAccelerationResidual_age7, datAge7$AgeAccelerationResidual_age7)$p.value, 3)
+tab1_all$p[20] = round(wilcox.test(datAll$DNAmAgeSkinBloodClock_age7, datAge7$DNAmAgeSkinBloodClock_age7)$p.value, 3)
+tab1_all$p[21] = round(wilcox.test(datAll$DNAmAgeSkinBloodClockAdjAge_age7, datAge7$DNAmAgeSkinBloodClockAdjAge_age7)$p.value, 3)
+
+tab1_all$p[22] = round(chisq.test(table((data.frame(time = c(rep('all', times = 59), rep('cord', times = 485)), var = c(datAll$coll_grad, datCord$coll_grad)))))$p.value, 3)
+tab1_all$p[25] = round(chisq.test(table((data.frame(time = c(rep('all', times = 59), rep('cord', times = 485)), var = c(datAll$smk_preg2, datCord$smk_preg2)))))$p.value, 3)
+tab1_all$p[29] = round(chisq.test(table((data.frame(time = c(rep('all', times = 59), rep('cord', times = 485)), var = c(datAll$gt70k, datCord$gt70k)))))$p.value, 3)
+tab1_all$p[32] = round(chisq.test(table((data.frame(time = c(rep('all', times = 59), rep('cord', times = 485)), var = c(datAll$female_d, datCord$female_d)))))$p.value, 3)
+tab1_all$p[35] = round(fisher.test(table((data.frame(time = c(rep('all', times = 59), rep('cord', times = 485)), var = c(datAll$race_child2, datCord$race_child2)))))$p.value, 3)
+tab1_all$p[41] = round(fisher.test(table((data.frame(time = c(rep('all', times = 59), rep('cord', times = 485)), var = c(datAll$preterm, datCord$preterm)))))$p.value, 3)
+
+colnames(tab1_all) = c('Var', '', '', 'Missing', 'p')
+tab1_all[is.na(tab1_all)] = ''
+```
+
+### Cord blood
+```{r, echo = F}
+tab1_cord %>% kable() %>% kable_styling(font_size = 14) %>% scroll_box(width = "800px", height = "500px")
+```
+
+### Early childhood
+```{r, echo = F}
+tab1_age3 %>% kable() %>% kable_styling(font_size = 14) %>% scroll_box(width = "800px", height = "500px")
+```
+
+### Mid-childhood
+```{r, echo = F}
+tab1_age7 %>% kable() %>% kable_styling(font_size = 14) %>% scroll_box(width = "800px", height = "500px")
+```
+
+### Samples with data at all timepoints
+```{r, echo = F}
+tab1_all %>% kable() %>% kable_styling(font_size = 14) %>% scroll_box(width = "800px", height = "500px")
+```
+
+## Correlations with chronological age and among clocks (Figures 2 and 3, supplemental Table S2)
+```{r,warning=FALSE,message=FALSE}
+# Cord blood GA and EGA
+cordEGA_cor = corr.test(datCord[,c('gestage_wks_deliv_d', 'GA_BohlinPred_wks', 'GA_KnightPred_wks')])
+
+# Cord blood GA and EA
+cordEA_cor = corr.test(datCord[,c('GA_wks_adj39', 'DNAmAge_cord_wks', 'DNAmAgeSkinBloodClock_cord_wks')])
+
+# Early childhood age and EA
+age3_cor = corr.test(datAge3[,c('Age_age3', 'DNAmAge_age3', 'DNAmAgeSkinBloodClock_age3')])
+
+# Mid-childhood age and EA
+age7_cor = corr.test(datAge7[,c('Age_age7', 'DNAmAge_age7', 'DNAmAgeSkinBloodClock_age7')])
+```
+
+### Cord blood and EGA
+#### Correlation coefficients
+```{r, echo = F}
+cordEGA_cor$r %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### p-values
+```{r, echo = F}
+cordEGA_cor$p %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Cord blood and EA
+#### Correlation coefficients
+```{r, echo = F}
+cordEA_cor$r %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### p-values
+```{r, echo = F}
+cordEA_cor$p %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Early childhood
+#### Correlation coefficients
+```{r, echo = F}
+age3_cor$r %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### p-values
+```{r, echo = F}
+age3_cor$p %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Mid-childhood
+#### Correlation coefficients
+```{r, echo = F}
+age7_cor$r %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### p-values
+```{r, echo = F}
+age7_cor$p %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+
+## MAE with chronological age (shown in Figures 2 and 3)
+```{r,warning=FALSE,message=FALSE}
+# Cord blood and EGA
+cordMAE_EGA = data.frame(matrix(nrow = 1, ncol = 2))
+colnames(cordMAE_EGA) = c('Bohlin', 'Knight')
+rownames(cordMAE_EGA) = 'Chronological GA'
+cordMAE_EGA[1,1] = mdae(datCord$gestage_wks_deliv_d, datCord$GA_BohlinPred_wks)
+cordMAE_EGA[1,2] = mdae(datCord$gestage_wks_deliv_d, datCord$GA_KnightPred_wks)
+
+# Cord blood and EA (using GA converted to years [(gestational week – 39)/52])
+cordMAE_EA = data.frame(matrix(nrow = 1, ncol = 2))
+colnames(cordMAE_EA) = c('Horvath', 'Skinblood')
+rownames(cordMAE_EA) = 'Chronological GA'
+cordMAE_EA[1,1] = mdae(datCord$GA_wks_adj39, datCord$DNAmAge_cord_wks)
+cordMAE_EA[1,2] = mdae(datCord$GA_wks_adj39, datCord$DNAmAgeSkinBloodClock_cord_wks)
+
+# Early childhood
+age3MAE = data.frame(matrix(nrow = 1, ncol = 2))
+colnames(age3MAE) = c('Horvath', 'Skinblood')
+rownames(age3MAE) = 'Chronological age'
+age3MAE[1,1] = mdae(datAge3$Age_age3, datAge3$DNAmAge_age3)
+age3MAE[1,2] = mdae(datAge3$Age_age3, datAge3$DNAmAgeSkinBloodClock_age3)
+
+# Early childhood
+age7MAE = data.frame(matrix(nrow = 1, ncol = 2))
+colnames(age7MAE) = c('Horvath', 'Skinblood')
+rownames(age7MAE) = 'Chronological age'
+age7MAE[1,1] = mdae(datAge7$Age_age7, datAge7$DNAmAge_age7)
+age7MAE[1,2] = mdae(datAge7$Age_age7, datAge7$DNAmAgeSkinBloodClock_age7)
+```
+
+### Cord blood and EGA
+```{r, echo = F}
+cordMAE_EGA %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Cord blood and EA
+```{r, echo = F}
+cordMAE_EA %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Early childhood
+```{r, echo = F}
+age3MAE %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Mid-childhood
+```{r, echo = F}
+age7MAE %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+## Adjusting for GA in early and mid-childhood estimates (Supplemental Figure 1)
+```{r,warning=FALSE,message=FALSE}
+datAge3$Age_age3_GAadj = datAge3$Age_age3 + datAge3$gestage_wks_deliv_d/52
+datAge7$Age_age7_GAadj = datAge7$Age_age7 + datAge7$gestage_wks_deliv_d/52
+
+datAge3$DNAm_absDiff = abs(datAge3$DNAmAge_age3 - datAge3$Age_age3)
+datAge7$DNAm_absDiff = abs(datAge7$DNAmAge_age7 - datAge7$Age_age7)
+datAge3$DNAm_absDiff_GAadj = abs(datAge3$DNAmAge_age3 - datAge3$Age_age3_GAadj)
+datAge7$DNAm_absDiff_GAadj = abs(datAge7$DNAmAge_age7 - datAge7$Age_age7_GAadj)
+
+# MAE after adjusting for GA
+mdae(datAge3$Age_age3_GAadj, datAge3$DNAmAge_age3)
+mdae(datAge7$Age_age7_GAadj, datAge7$DNAmAge_age7)
+
+# test for differences with and without GA adjustment
+wilcox.test(datAge3$DNAm_absDiff, datAge3$DNAm_absDiff_GAadj, paired = T)
+
+wilcox.test(datAge7$DNAm_absDiff, datAge7$DNAm_absDiff_GAadj, paired = T)
+```
+
+## Correlations between cord blood EGAA/EAA and EAA in cord blood and mid-childhood blood (Supplemental Table 2)
+```{r,warning=FALSE,message=FALSE}
+# Bohin EGAA and Horvath EAA in cord blood
+cor.test(datCord$GA_BohlinPred_EAA, datCord$AgeAccelerationResidual_cord, method = 'spearman', use = 'all')
+
+# Bohin EGAA and skin & blood EAA in cord blood
+cor.test(datCord$GA_BohlinPred_EAA, datCord$DNAmAgeSkinBloodClockAdjAge_cord, method = 'spearman', use = 'all')
+
+# Knight EGAA and Horvath EAA in cord blood
+cor.test(datCord$GA_KnightPred_EAA, datCord$AgeAccelerationResidual_cord, method = 'spearman', use = 'all')
+
+# Knight EGAA and skin & blood EAA in cord blood
+cor.test(datCord$GA_KnightPred_EAA, datCord$DNAmAgeSkinBloodClockAdjAge_cord, method = 'spearman', use = 'all')
+
+# Bohin EGAA and Horvath EAA in mid-childhood
+cor.test(datCord$GA_BohlinPred_EAA, datCord$AgeAccelerationResidual_age7, method = 'spearman', use = 'all')
+
+# Bohin EGAA and skin & blood EAA in mid-childhood
+cor.test(datCord$GA_BohlinPred_EAA, datCord$DNAmAgeSkinBloodClockAdjAge_age7, method = 'spearman', use = 'all')
+
+# Knight EGAA and Horvath EAA in mid-childhood
+cor.test(datCord$GA_KnightPred_EAA, datCord$AgeAccelerationResidual_age7, method = 'spearman', use = 'all')
+
+# Knight EGAA and skin & blood EAA in mid-childhood
+cor.test(datCord$GA_KnightPred_EAA, datCord$DNAmAgeSkinBloodClockAdjAge_age7, method = 'spearman', use = 'all')
+```
+
+
+## Spearman correlations with cell type (Figure 4)
+```{r,warning=FALSE,message=FALSE,echo= FALSE}
+# Cord blood
+cellCord = c("Bcell_perc_cord", "CD4T_perc_cord", "CD8T_perc_cord", "Gran_perc_cord", "Mono_perc_cord", "NK_perc_cord", "nRBC_perc_cord")
+
+cell_cord_df = data.frame(y = rep(c('% B cells', '% CD4+ T cells', '% CD8+ T cells', '% granulocytes', '% monocytes', '% NK cells', '% nucleated RBCs'), times = 5),
+    x = rep(c('Chronological GA  ', 'Bohlin  EGAA  ', 'Knight  EGAA  ', 'Horvath EAA ', 'Skin & blood EAA   '), each = 7), r = NA, p = NA)
+
+agevars = c('gestage_wks_deliv_d', 'GA_BohlinPred_EAA_wks', 'GA_KnightPred_EAA_wks', 'AgeAccelerationResidual_cord_wks', 'DNAmAgeSkinBloodClockAdjAge_cord_wks')
+row = 1
+for (i in 1:length(agevars)){
+    for (j in 1:length(cellCord)){
+        cell_cord_df[row,3] = cor.test(datCord[[cellCord[j]]], datCord[[agevars[[i]]]], method = 'spearman', exact = F)[[4]]
+        cell_cord_df[row,4] = cor.test(datCord[[cellCord[j]]], datCord[[agevars[[i]]]], method = 'spearman', exact = F)[[3]]
+        row = row + 1
+    }
+}
+
+# Early childhood
+cellAge3 = c("Bcell_perc_age3", "CD4T_perc_age3", "CD8T_perc_age3", "Neu_perc_age3", "Mono_perc_age3", "NK_perc_age3")
+
+cell_age3_df = data.frame(y = rep(c('% B cells', '% CD4+ T cells', '% CD8+ T cells', '% neutrophils', '% monocytes', '% NK cells'), times = 3),
+    x = rep(c('Chronological\n age ', 'Horvath\n EAA ', 'Skin & blood\n EAA   '), each = 6), r = NA, p = NA)
+
+agevars = c('Age_age3', 'AgeAccelerationResidual_age3', 'DNAmAgeSkinBloodClockAdjAge_age3')
+row = 1
+for (i in 1:length(agevars)){
+    for (j in 1:length(cellAge3)){
+        cell_age3_df[row,3] = cor.test(datAge3[[cellAge3[j]]], datAge3[[agevars[[i]]]], method = 'spearman', exact = F)[[4]]
+        cell_age3_df[row,4] = cor.test(datAge3[[cellAge3[j]]], datAge3[[agevars[[i]]]], method = 'spearman', exact = F)[[3]]
+        row = row + 1
+    }
+}
+
+# Mid-childhood
+cellAge7 = c("Bcell_perc_age7", "CD4T_perc_age7", "CD8T_perc_age7", "Neu_perc_age7", "Mono_perc_age7", "NK_perc_age7")
+
+cell_age7_df = data.frame(y = rep(c('% B cells', '% CD4+ T cells', '% CD8+ T cells', '% neutrophils', '% monocytes', '% NK cells'), times = 3),
+    x = rep(c('Chronological\n age ', 'Horvath\n EAA ', 'Skin & blood\n EAA   '), each = 6), r = NA, p = NA)
+
+agevars = c('Age_age7', 'AgeAccelerationResidual_age7', 'DNAmAgeSkinBloodClockAdjAge_age7')
+row = 1
+for (i in 1:length(agevars)){
+    for (j in 1:length(cellAge7)){
+        cell_age7_df[row,3] = cor.test(datAge7[[cellAge7[j]]], datAge7[[agevars[[i]]]], method = 'spearman', exact = F)[[4]]
+        cell_age7_df[row,4] = cor.test(datAge7[[cellAge7[j]]], datAge7[[agevars[[i]]]], method = 'spearman', exact = F)[[3]]
+        row = row + 1
+    }
+}
+```
+
+### Cord blood
+```{r, echo = F}
+cell_cord_df %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Early childhood
+```{r, echo = F}
+cell_age3_df %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Mid-childhood
+```{r, echo = F}
+cell_age7_df %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+## Associations with maternal-infant characteristics
+### Cord blood (Figure 5, Supplemental Table S3)
+```{r,warning=FALSE,message=FALSE,eval= FALSE}
+# Bohlin
+mod_multivar_cord_Bohlin = rlm(GA_BohlinPred_EAA_wks ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2, data = datCord)
+coef = coeftest(mod_multivar_cord_Bohlin, vcovHC(mod_multivar_cord_Bohlin, type="HC0"))
+ci = coefci(x = mod_multivar_cord_Bohlin, level = 0.95, vcov. = vcovHC(mod_multivar_cord_Bohlin, type="HC0"))
+multivar_cord_Bohlin = data.frame(B_boh = coef[,1], CI_boh_low = ci[,1], CI_boh_high = ci[,2], summary_boh = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_boh = round(coef[,4],3))
+
+mod_multivar_cell_cord_Bohlin = rlm(GA_BohlinPred_EAA_wks ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_Bohlin, vcovHC(mod_multivar_cell_cord_Bohlin, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Bohlin, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Bohlin, type="HC0"))
+multivar_cell_cord_Bohlin = data.frame(B_boh_cellAdj = coef[,1], CI_boh_low_cellAdj = ci[,1], CI_boh_high_cellAdj = ci[,2], summary_boh_cellAdj = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_boh_cellAdj = round(coef[,4], 3))
+
+# Knight
+mod_multivar_cord_Knight = rlm(GA_KnightPred_EAA_wks ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2, data = datCord)
+coef = coeftest(mod_multivar_cord_Knight, vcovHC(mod_multivar_cord_Knight, type="HC0"))
+ci = coefci(x = mod_multivar_cord_Knight, level = 0.95, vcov. = vcovHC(mod_multivar_cord_Knight, type="HC0"))
+multivar_cord_Knight = data.frame(B_kn = coef[,1], CI_kn_low = ci[,1], CI_kn_high = ci[,2], summary_kn = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_kn = round(coef[,4], 3))
+
+mod_multivar_cell_cord_Knight = rlm(GA_KnightPred_EAA_wks ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_Knight, vcovHC(mod_multivar_cell_cord_Knight, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Knight, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Knight, type="HC0"))
+multivar_cell_cord_Knight = data.frame(B_kn_cellAdj = coef[,1], CI_kn_low_cellAdj = ci[,1], CI_kn_high_cellAdj = ci[,2], summary_kn_cellAdj = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_kn_cellAdj = round(coef[,4], 3))
+
+# Horvath
+mod_multivar_cord_Horvath = rlm(AgeAccelerationResidual_cord_wks ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2, data = datCord)
+coef = coeftest(mod_multivar_cord_Horvath, vcovHC(mod_multivar_cord_Horvath, type="HC0"))
+ci = coefci(x = mod_multivar_cord_Horvath, level = 0.95, vcov. = vcovHC(mod_multivar_cord_Horvath, type="HC0"))
+multivar_cord_Horvath = data.frame(B_hor = coef[,1], CI_hor_low = ci[,1], CI_hor_high = ci[,2], summary_hor = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_hor = round(coef[,4], 3))
+
+mod_multivar_cell_cord_Horvath = rlm(AgeAccelerationResidual_cord_wks ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_Horvath, vcovHC(mod_multivar_cell_cord_Horvath, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Horvath, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Horvath, type="HC0"))
+multivar_cell_cord_Horvath = data.frame(B_hor_cellAdj = coef[,1], CI_hor_low_cellAdj = ci[,1], CI_hor_high_cellAdj = ci[,2], summary_hor_cellAdj = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_hor_cellAdj = round(coef[,4], 3))
+
+# skin & blood
+mod_multivar_cord_skinblood = rlm(DNAmAgeSkinBloodClockAdjAge_cord_wks ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2, data = datCord)
+coef = coeftest(mod_multivar_cord_skinblood, vcovHC(mod_multivar_cord_skinblood, type="HC0"))
+ci = coefci(x = mod_multivar_cord_skinblood, level = 0.95, vcov. = vcovHC(mod_multivar_cord_skinblood, type="HC0"))
+multivar_cord_skinblood = data.frame(B_sb = coef[,1], CI_sb_low = ci[,1], CI_sb_high = ci[,2], summary_sb = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_sb = round(coef[,4], 3))
+
+mod_multivar_cell_cord_skinblood = rlm(DNAmAgeSkinBloodClockAdjAge_cord_wks ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_skinblood, vcovHC(mod_multivar_cell_cord_skinblood, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_skinblood, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_skinblood, type="HC0"))
+multivar_cell_cord_skinblood = data.frame(B_sb_cellAdj = coef[,1], CI_sb_low_cellAdj = ci[,1], CI_sb_high_cellAdj = ci[,2], summary_sb_cellAdj = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_sb_cellAdj = round(coef[,4], 3))
+```
+
+#### Bohlin EGAA
+```{r, echo = F}
+cbind(multivar_cord_Bohlin[-1,c(4,5)], multivar_cell_cord_Bohlin[c(2:13),c(4,5)]) %>% kable() %>% kable_styling(font_size = 14) %>% add_header_above(c(" " = 1, "Not adjusted for cell type" = 2, "Adjusted for cellt type" = 2))
+```
+
+#### Knight EGAA
+```{r, echo = F}
+cbind(multivar_cord_Knight[-1,c(4,5)], multivar_cell_cord_Knight[c(2:13),c(4,5)]) %>% kable() %>% kable_styling(font_size = 14) %>% add_header_above(c(" " = 1, "Not adjusted for cell type" = 2, "Adjusted for cellt type" = 2))
+```
+
+#### Horvath EAA
+```{r, echo = F}
+cbind(multivar_cord_Horvath[-1,c(4,5)], multivar_cell_cord_Horvath[c(2:13),c(4,5)]) %>% kable() %>% kable_styling(font_size = 14) %>% add_header_above(c(" " = 1, "Not adjusted for cell type" = 2, "Adjusted for cellt type" = 2))
+```
+
+#### Skin & blood EAA
+```{r, echo = F}
+cbind(multivar_cord_skinblood[-1,c(4,5)], multivar_cell_cord_skinblood[c(2:13),c(4,5)]) %>% kable() %>% kable_styling(font_size = 14) %>% add_header_above(c(" " = 1, "Not adjusted for cell type" = 2, "Adjusted for cellt type" = 2))
+```
+
+### Cord blood, female (Supplemental Table S4)
+```{r,warning=FALSE,message=FALSE,eval= FALSE}
+datCord_f = datCord[datCord$female_d == 1,]
+
+# Bohlin
+mod_multivar_cell_cord_Bohlin_f = rlm(GA_BohlinPred_EAA_wks ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord_f)
+coef = coeftest(mod_multivar_cell_cord_Bohlin_f, vcovHC(mod_multivar_cell_cord_Bohlin_f, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Bohlin_f, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Bohlin_f, type="HC0"))
+multivar_cell_cord_Bohlin_f = data.frame(B_boh_cellAdj_f = coef[,1], CI_boh_low_cellAdj_f = ci[,1], CI_boh_high_cellAdj_f = ci[,2], summary_boh_cellAdj_f = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_boh_cellAdj_f = round(coef[,4], 3))
+
+# Knight
+mod_multivar_cell_cord_Knight_f = rlm(GA_KnightPred_EAA_wks ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord_f)
+coef = coeftest(mod_multivar_cell_cord_Knight_f, vcovHC(mod_multivar_cell_cord_Knight_f, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Knight_f, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Knight_f, type="HC0"))
+multivar_cell_cord_Knight_f = data.frame(B_kn_cellAdj_f = coef[,1], CI_kn_low_cellAdj_f = ci[,1], CI_kn_high_cellAdj_f = ci[,2], summary_kn_cellAdj_f = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_kn_cellAdj_f = round(coef[,4], 3))
+
+# Horvath
+mod_multivar_cell_cord_Horvath_f = rlm(AgeAccelerationResidual_cord_wks ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord_f)
+coef = coeftest(mod_multivar_cell_cord_Horvath_f, vcovHC(mod_multivar_cell_cord_Horvath_f, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Horvath_f, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Horvath_f, type="HC0"))
+multivar_cord_Horvath_f = data.frame(B_hor_cellAdj_f = coef[,1], CI_hor_low_cellAdj_f = ci[,1], CI_hor_high_cellAdj_f = ci[,2], summary_hor_cellAdj_f = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_hor_cellAdj_f = round(coef[,4], 3))
+
+# skin & blood
+mod_multivar_cell_cord_skinblood_f = rlm(DNAmAgeSkinBloodClockAdjAge_cord_wks ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord_f)
+coef = coeftest(mod_multivar_cell_cord_skinblood_f, vcovHC(mod_multivar_cell_cord_skinblood_f, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_skinblood_f, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_skinblood_f, type="HC0"))
+multivar_cell_cord_skinblood_f = data.frame(B_sb_cellAdj_f = coef[,1], CI_sb_low_cellAdj_f = ci[,1], CI_sb_high_cellAdj_f = ci[,2], summary_sb_cellAdj_f = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_sb_cellAdj_f = round(coef[,4], 3))
+```
+
+#### Bohlin EGAA, female
+```{r, echo = F}
+multivar_cell_cord_Bohlin_f[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Knight EGAA, female
+```{r, echo = F}
+multivar_cell_cord_Knight_f[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Horvath EAA, female
+```{r, echo = F}
+multivar_cord_Horvath_f[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Skin & blood EAA, female
+```{r, echo = F}
+multivar_cell_cord_skinblood_f[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Cord blood, male (Supplemental Table S5)
+```{r,warning=FALSE,message=FALSE,eval= FALSE}
+datCord_m = datCord[datCord$female_d == 0,]
+
+# Bohlin
+mod_multivar_cell_cord_Bohlin_m = rlm(GA_BohlinPred_EAA_wks ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord_m)
+coef = coeftest(mod_multivar_cell_cord_Bohlin_m, vcovHC(mod_multivar_cell_cord_Bohlin_m, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Bohlin_m, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Bohlin_m, type="HC0"))
+multivar_cell_cord_Bohlin_m = data.frame(B_boh_cellAdj_m = coef[,1], CI_boh_low_cellAdj_m = ci[,1], CI_boh_high_cellAdj_m = ci[,2], summary_boh_cellAdj_m = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_boh_cellAdj_m = round(coef[,4], 3))
+
+# Knight
+mod_multivar_cell_cord_Knight_m = rlm(GA_KnightPred_EAA_wks ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord_m)
+coef = coeftest(mod_multivar_cell_cord_Knight_m, vcovHC(mod_multivar_cell_cord_Knight_m, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Knight_m, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Knight_m, type="HC0"))
+multivar_cell_cord_Knight_m = data.frame(B_kn_cellAdj_m = coef[,1], CI_kn_low_cellAdj_m = ci[,1], CI_kn_high_cellAdj_m = ci[,2], summary_kn_cellAdj_m = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_kn_cellAdj_m = round(coef[,4], 3))
+
+# Horvath
+mod_multivar_cell_cord_Horvath_m = rlm(AgeAccelerationResidual_cord_wks ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord_m)
+coef = coeftest(mod_multivar_cell_cord_Horvath_m, vcovHC(mod_multivar_cell_cord_Horvath_m, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Horvath_m, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Horvath_m, type="HC0"))
+multivar_cord_Horvath_m = data.frame(B_hor_cellAdj_m = coef[,1], CI_hor_low_cellAdj_m = ci[,1], CI_hor_high_cellAdj_m = ci[,2], summary_hor_cellAdj_m = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_hor_cellAdj_m = round(coef[,4], 3))
+
+# skin & blood
+mod_multivar_cell_cord_skinblood_m = rlm(DNAmAgeSkinBloodClockAdjAge_cord_wks ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord_m)
+coef = coeftest(mod_multivar_cell_cord_skinblood_m, vcovHC(mod_multivar_cell_cord_skinblood_m, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_skinblood_m, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_skinblood_m, type="HC0"))
+multivar_cell_cord_skinblood_m = data.frame(B_sb_cellAdj_m = coef[,1], CI_sb_low_cellAdj_m = ci[,1], CI_sb_high_cellAdj_m = ci[,2], summary_sb_cellAdj_m = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_sb_cellAdj_m = round(coef[,4], 3))
+```
+
+#### Bohlin EGAA, male
+```{r, echo = F}
+multivar_cell_cord_Bohlin_m[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Knight EGAA, male
+```{r, echo = F}
+multivar_cell_cord_Knight_m[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Horvath EAA, male
+```{r, echo = F}
+multivar_cord_Horvath_m[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Skin & blood EAA, male
+```{r, echo = F}
+multivar_cell_cord_skinblood_m[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Cord blood, testing sex interactions 
+```{r,warning=FALSE,message=FALSE,eval= FALSE}
+# Bohlin, maternal BMI
+mod_multivar_cell_cord_Bohlin_BMIint = rlm(GA_BohlinPred_EAA_wks ~ female_d*bmi_scale + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_Bohlin_BMIint, vcovHC(mod_multivar_cell_cord_Bohlin_BMIint, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Bohlin_BMIint, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Bohlin_BMIint, type="HC0"))
+multivar_cell_cord_Bohlin_BMIint = data.frame(B_boh_cellAdj_BMIint = coef[,1], CI_boh_low_cellAdj_BMIint = ci[,1], CI_boh_high_cellAdj_BMIint = ci[,2], summary_boh_cellAdj_BMIint = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_boh_cellAdj_BMIint = round(coef[,4], 3))
+#                       B_boh_cellAdj_BMIint CI_boh_low_cellAdj_BMIint CI_boh_high_cellAdj_BMIint summary_boh_cellAdj_BMIint p_boh_cellAdj_BMIint
+# female_d1:bmi_scale            0.265870514               0.004710311               0.5270307179             0.27 (0, 0.53)                0.046
+
+# Bohlin, maternal smoking
+mod_multivar_cell_cord_Bohlin_Smkint = rlm(GA_BohlinPred_EAA_wks ~ female_d*smk_preg2 + bmi_scale + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + coll_grad + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_Bohlin_Smkint, vcovHC(mod_multivar_cell_cord_Bohlin_Smkint, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Bohlin_Smkint, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Bohlin_Smkint, type="HC0"))
+multivar_cell_cord_Bohlin_Smkint = data.frame(B_boh_cellAdj_Smkint = coef[,1], CI_boh_low_cellAdj_Smkint = ci[,1], CI_boh_high_cellAdj_Smkint = ci[,2], summary_boh_cellAdj_Smkint = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_boh_cellAdj_Smkint = round(coef[,4], 3))
+#                       B_boh_cellAdj_Smkint CI_boh_low_cellAdj_Smkint CI_boh_high_cellAdj_Smkint summary_boh_cellAdj_Smkint p_boh_cellAdj_Smkint
+# female_d1:smk_preg21          -0.108543288             -4.253510e-01                0.208264422        -0.11 (-0.43, 0.21)                0.502
+# female_d1:smk_preg22           0.190679986             -1.896235e-01                0.570983516         0.19 (-0.19, 0.57)                0.326
+
+# Knight, maternal BMI
+mod_multivar_cell_cord_Knight_BMIint = rlm(GA_KnightPred_EAA_wks ~ female_d*bmi_scale + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_Knight_BMIint, vcovHC(mod_multivar_cell_cord_Knight_BMIint, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Knight_BMIint, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Knight_BMIint, type="HC0"))
+multivar_cell_cord_Knight_BMIint = data.frame(B_kn_cellAdj_BMIint = coef[,1], CI_kn_low_cellAdj_BMIint = ci[,1], CI_kn_high_cellAdj_BMIint = ci[,2], summary_kn_cellAdj_BMIint = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_kn_cellAdj_BMIint = round(coef[,4], 3))
+#                       B_kn_cellAdj_BMIint CI_kn_low_cellAdj_BMIint CI_kn_high_cellAdj_BMIint summary_kn_cellAdj_BMIint p_kn_cellAdj_BMIint
+# female_d1:bmi_scale            0.52606220               0.07036271               0.981761698         0.53 (0.07, 0.98)               0.024
+
+# Knight, maternal smoking
+mod_multivar_cell_cord_Knight_Smkint = rlm(GA_KnightPred_EAA_wks ~ female_d*smk_preg2 + bmi_scale + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + coll_grad + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_Knight_Smkint, vcovHC(mod_multivar_cell_cord_Knight_Smkint, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Knight_Smkint, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Knight_Smkint, type="HC0"))
+multivar_cell_cord_Knight_Smkint = data.frame(B_kn_cellAdj_Smkint = coef[,1], CI_kn_low_cellAdj_Smkint = ci[,1], CI_kn_high_cellAdj_Smkint = ci[,2], summary_kn_cellAdj_Smkint = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_kn_cellAdj_Smkint = round(coef[,4], 3))
+#                       B_kn_cellAdj_Smkint CI_kn_low_cellAdj_Smkint CI_kn_high_cellAdj_Smkint summary_kn_cellAdj_Smkint p_kn_cellAdj_Smkint
+# female_d1:smk_preg21         -0.291929165              -0.81673707               0.232878737       -0.29 (-0.82, 0.23)               0.276
+# female_d1:smk_preg22         -0.687874351              -1.37258980              -0.003158899          -0.69 (-1.37, 0)               0.049
+
+# Horvath, BW z-score
+mod_multivar_cell_cord_Horvath_BWint = rlm(AgeAccelerationResidual_cord_wks ~ female_d*zvalue_bwt_gage_sex_d + preterm + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_cord + CD4T_perc_cord + CD8T_perc_cord + Gran_perc_cord + Mono_perc_cord + NK_perc_cord + nRBC_perc_cord, data = datCord)
+coef = coeftest(mod_multivar_cell_cord_Horvath_BWint, vcovHC(mod_multivar_cell_cord_Horvath_BWint, type="HC0"))
+ci = coefci(x = mod_multivar_cell_cord_Horvath_BWint, level = 0.95, vcov. = vcovHC(mod_multivar_cell_cord_Horvath_BWint, type="HC0"))
+multivar_cell_cord_Horvath_BWint = data.frame(B_hor_cellAdj_BWint = coef[,1], CI_hor_low_cellAdj_BWint = ci[,1], CI_hor_high_cellAdj_BWint = ci[,2], summary_hor_cellAdj_BWint = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_hor_cellAdj_BWint = round(coef[,4], 3))
+#                                 B_hor_cellAdj_BWint CI_hor_low_cellAdj_BWint CI_hor_high_cellAdj_BWint summary_hor_cellAdj_BWint p_hor_cellAdj_BWint
+# female_d1:zvalue_bwt_gage_sex_d         -1.09658758               -2.6401953                 0.4470202        -1.1 (-2.64, 0.45)               0.164
+```
+
+
+### Early and mid-childhood (Figure 6, Supplemental Table S6)
+```{r,warning=FALSE,message=FALSE,eval= FALSE}
+# Early childhood Horvath
+mod_multivar_age3_Horvath = rlm(AgeAccelerationResidual_age3 ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2, data = datAge3)
+coef = coeftest(mod_multivar_age3_Horvath, vcovHC(mod_multivar_age3_Horvath, type="HC0"))
+ci = coefci(x = mod_multivar_age3_Horvath, level = 0.95, vcov. = vcovHC(mod_multivar_age3_Horvath, type="HC0"))
+multivar_age3_Horvath = data.frame(B_age3Hor = coef[,1], CI_age3Hor_low = ci[,1], CI_age3Hor_high = ci[,2], summary_age3Hor = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3Hor = round(coef[,4],3))
+
+mod_multivar_cell_age3_Horvath = rlm(AgeAccelerationResidual_age3 ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3)
+coef = coeftest(mod_multivar_cell_age3_Horvath, vcovHC(mod_multivar_cell_age3_Horvath, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age3_Horvath, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age3_Horvath, type="HC0"))
+multivar_cell_age3_Horvath = data.frame(B_age3Hor_cellAdj = coef[,1], CI_age3Hor_low_cellAdj = ci[,1], CI_age3Hor_high_cellAdj = ci[,2], summary_age3Hor_cellAdj = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3Hor_high_cellAdj = round(coef[,4], 3))
+
+# Early childhood skin & blood
+mod_multivar_age3_skinblood = rlm(DNAmAgeSkinBloodClockAdjAge_age3 ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2, data = datAge3)
+coef = coeftest(mod_multivar_age3_skinblood, vcovHC(mod_multivar_age3_skinblood, type="HC0"))
+ci = coefci(x = mod_multivar_age3_skinblood, level = 0.95, vcov. = vcovHC(mod_multivar_age3_skinblood, type="HC0"))
+multivar_age3_skinblood = data.frame(B_age3skin = coef[,1], CI_age3skin_low = ci[,1], CI_age3skin_high = ci[,2], summary_age3skin = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3skin = round(coef[,4], 3))
+
+mod_multivar_cell_age3_skinblood = rlm(DNAmAgeSkinBloodClockAdjAge_age3 ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3)
+coef = coeftest(mod_multivar_cell_age3_skinblood, vcovHC(mod_multivar_cell_age3_skinblood, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age3_skinblood, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age3_skinblood, type="HC0"))
+multivar_cell_age3_skinblood = data.frame(B_age3skin_cellAdj = coef[,1], CI_age3skin_low_cellAdj = ci[,1], CI_age3skin_high_cellAdj = ci[,2], summary_age3skin_cellAdj = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3skin_cellAdj = round(coef[,4], 3))
+
+# Mid-chiildhood Horvath
+mod_multivar_age7_Horvath = rlm(AgeAccelerationResidual_age7 ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2, data = datAge7)
+coef = coeftest(mod_multivar_age7_Horvath, vcovHC(mod_multivar_age7_Horvath, type="HC0"))
+ci = coefci(x = mod_multivar_age7_Horvath, level = 0.95, vcov. = vcovHC(mod_multivar_age7_Horvath, type="HC0"))
+multivar_age7_Horvath = data.frame(B_age7Hor = coef[,1], CI_age7Hor_low = ci[,1], CI_age7Hor_high = ci[,2], summary_age7Hor = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7Hor = round(coef[,4],3))
+
+mod_multivar_cell_age7_Horvath = rlm(AgeAccelerationResidual_age7 ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7)
+coef = coeftest(mod_multivar_cell_age7_Horvath, vcovHC(mod_multivar_cell_age7_Horvath, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age7_Horvath, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age7_Horvath, type="HC0"))
+multivar_cell_age7_Horvath = data.frame(B_age7Hor_cellAdj = coef[,1], CI_age7Hor_low_cellAdj = ci[,1], CI_age7Hor_high_cellAdj = ci[,2], summary_age7Hor_cellAdj = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7Hor_cellAdj = round(coef[,4], 3))
+
+# Mid-childhood skin & blood
+mod_multivar_age7_skinblood = rlm(DNAmAgeSkinBloodClockAdjAge_age7 ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2, data = datAge7)
+coef = coeftest(mod_multivar_age7_skinblood, vcovHC(mod_multivar_age7_skinblood, type="HC0"))
+ci = coefci(x = mod_multivar_age7_skinblood, level = 0.95, vcov. = vcovHC(mod_multivar_age7_skinblood, type="HC0"))
+multivar_age7_skinblood = data.frame(B_age7skin = coef[,1], CI_age7skin_low = ci[,1], CI_age7skin_high = ci[,2], summary_age7skin = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7skin = round(coef[,4], 3))
+
+mod_multivar_cell_age7_skinblood = rlm(DNAmAgeSkinBloodClockAdjAge_age7 ~ female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7)
+coef = coeftest(mod_multivar_cell_age7_skinblood, vcovHC(mod_multivar_cell_age7_skinblood, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age7_skinblood, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age7_skinblood, type="HC0"))
+multivar_cell_age7_skinblood = data.frame(B_age7skin_cellAdj = coef[,1], CI_age7skin_low_cellAdj = ci[,1], CI_age7skin_high_cellAdj = ci[,2], summary_age7skin_cellAdj = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7skin_cellAdj = round(coef[,4], 3))
+```
+
+#### Early childhood Horvath EAA
+```{r, echo = F}
+cbind(multivar_age3_Horvath[-1,c(4,5)], multivar_cell_age3_Horvath[c(2:13),c(4,5)]) %>% kable() %>% kable_styling(font_size = 14) %>% add_header_above(c(" " = 1, "Not adjusted for cell type" = 2, "Adjusted for cellt type" = 2))
+```
+
+#### Early childhood skin & blood EAA
+```{r, echo = F}
+cbind(multivar_age3_skinblood[-1,c(4,5)], multivar_cell_age3_skinblood[c(2:13),c(4,5)]) %>% kable() %>% kable_styling(font_size = 14) %>% add_header_above(c(" " = 1, "Not adjusted for cell type" = 2, "Adjusted for cellt type" = 2))
+```
+
+#### Mid-childhood Horvath EAA
+```{r, echo = F}
+cbind(multivar_age7_Horvath[-1,c(4,5)], multivar_cell_age7_Horvath[c(2:13),c(4,5)]) %>% kable() %>% kable_styling(font_size = 14) %>% add_header_above(c(" " = 1, "Not adjusted for cell type" = 2, "Adjusted for cellt type" = 2))
+```
+
+#### Mid-childhood skin & blood EAA
+```{r, echo = F}
+cbind(multivar_age7_skinblood[-1,c(4,5)], multivar_cell_age7_skinblood[c(2:13),c(4,5)]) %>% kable() %>% kable_styling(font_size = 14) %>% add_header_above(c(" " = 1, "Not adjusted for cell type" = 2, "Adjusted for cellt type" = 2))
+```
+
+### Early and mid-childhood, female (Supplemental Table S7)
+```{r,warning=FALSE,message=FALSE,eval= FALSE}
+datAge3_f = datAge3[datAge3$female_d == 1,]
+datAge7_f = datAge7[datAge7$female_d == 1,]
+
+# Early childhood Horvath
+mod_multivar_cell_age3_Horvath_f = rlm(AgeAccelerationResidual_age3 ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3_f)
+coef = coeftest(mod_multivar_cell_age3_Horvath_f, vcovHC(mod_multivar_cell_age3_Horvath_f, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age3_Horvath_f, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age3_Horvath_f, type="HC0"))
+multivar_cell_age3_Horvath_f = data.frame(B_age3Hor_cellAdj_f = coef[,1], CI_age3Hor_low_cellAdj_f = ci[,1], CI_age3Hor_high_cellAdj_f = ci[,2], summary_age3Hor_cellAdj_f = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3Hor_cellAdj_f = round(coef[,4], 3))
+
+# Early childhood skin & blood
+mod_multivar_cell_age3_skinblood_f = rlm(DNAmAgeSkinBloodClockAdjAge_age3 ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3_f)
+coef = coeftest(mod_multivar_cell_age3_skinblood_f, vcovHC(mod_multivar_cell_age3_skinblood_f, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age3_skinblood_f, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age3_skinblood_f, type="HC0"))
+multivar_cell_age3_skinblood_f = data.frame(B_age3skin_cellAdj_f = coef[,1], CI_age3skin_low_cellAdj_f = ci[,1], CI_age3skin_high_cellAdj_f = ci[,2], summary_age3skin_cellAdj_f = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3skin_cellAdj_f = round(coef[,4], 3))
+
+# Mid-chiildhood Horvath
+mod_multivar_cell_age7_Horvath_f = rlm(AgeAccelerationResidual_age7 ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7_f)
+coef = coeftest(mod_multivar_cell_age7_Horvath_f, vcovHC(mod_multivar_cell_age7_Horvath_f, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age7_Horvath_f, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age7_Horvath_f, type="HC0"))
+multivar_cell_age7_Horvath_f = data.frame(B_age7Hor_cellAdj_f = coef[,1], CI_age7Hor_low_cellAdj_f = ci[,1], CI_age7Hor_high_cellAdj_f = ci[,2], summary_age7Hor_cellAdj_f = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7Hor_cellAdj_f = round(coef[,4], 3))
+
+# Mid-childhood skin & blood
+mod_multivar_cell_age7_skinblood_f = rlm(DNAmAgeSkinBloodClockAdjAge_age7 ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7_f)
+coef = coeftest(mod_multivar_cell_age7_skinblood_f, vcovHC(mod_multivar_cell_age7_skinblood_f, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age7_skinblood_f, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age7_skinblood_f, type="HC0"))
+multivar_cell_age7_skinblood_f = data.frame(B_age7skin_cellAdj_f = coef[,1], CI_age7skin_low_cellAdj_f = ci[,1], CI_age7skin_high_cellAdj_f = ci[,2], summary_age7skin_cellAdj_f = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7skin_cellAdj_f = round(coef[,4], 3))
+```
+
+#### Early childhood Horvath EAA, female
+```{r, echo = F}
+multivar_cell_age3_Horvath_f[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Early childhood skin & blood EAA, female
+```{r, echo = F}
+multivar_cell_age3_skinblood_f[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Mid-childhood Horvath EAA, female
+```{r, echo = F}
+multivar_cell_age7_Horvath_f[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Mid-childhood skin & blood EAA, female
+```{r, echo = F}
+multivar_cell_age7_skinblood_f[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Early and mid-childhood, male (Supplemental Table S8)
+```{r,warning=FALSE,message=FALSE,eval= FALSE}
+datAge3_m = datAge3[datAge3$female_d == 0,]
+datAge7_m = datAge7[datAge7$female_d == 0,]
+
+# Early childhood Horvath
+mod_multivar_cell_age3_Horvath_m = rlm(AgeAccelerationResidual_age3 ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3_m)
+coef = coeftest(mod_multivar_cell_age3_Horvath_m, vcovHC(mod_multivar_cell_age3_Horvath_m, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age3_Horvath_m, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age3_Horvath_m, type="HC0"))
+multivar_cell_age3_Horvath_m = data.frame(B_age3Hor_cellAdj_m = coef[,1], CI_age3Hor_low_cellAdj_m = ci[,1], CI_age3Hor_high_cellAdj_m = ci[,2], summary_age3Hor_cellAdj_m = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3Hor_cellAdj_m = round(coef[,4], 3))
+
+# Early childhood skin & blood
+mod_multivar_cell_age3_skinblood_m = rlm(DNAmAgeSkinBloodClockAdjAge_age3 ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3_m)
+coef = coeftest(mod_multivar_cell_age3_skinblood_m, vcovHC(mod_multivar_cell_age3_skinblood_m, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age3_skinblood_m, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age3_skinblood_m, type="HC0"))
+multivar_cell_age3_skinblood_m = data.frame(B_age3skin_cellAdj_m = coef[,1], CI_age3skin_low_cellAdj_m = ci[,1], CI_age3skin_high_cellAdj_m = ci[,2], summary_age3skin_cellAdj_m = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3skin_cellAdj_m = round(coef[,4], 3))
+
+# Mid-chiildhood Horvath
+mod_multivar_cell_age7_Horvath_m = rlm(AgeAccelerationResidual_age7 ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7_m)
+coef = coeftest(mod_multivar_cell_age7_Horvath_m, vcovHC(mod_multivar_cell_age7_Horvath_m, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age7_Horvath_m, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age7_Horvath_m, type="HC0"))
+multivar_cell_age7_Horvath_m = data.frame(B_age7Hor_cellAdj_m = coef[,1], CI_age7Hor_low_cellAdj_m = ci[,1], CI_age7Hor_high_cellAdj_m = ci[,2], summary_age7Hor_cellAdj_m = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7Hor_cellAdj_m = round(coef[,4], 3))
+
+# Mid-childhood skin & blood
+mod_multivar_cell_age7_skinblood_m = rlm(DNAmAgeSkinBloodClockAdjAge_age7 ~ preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7_m)
+coef = coeftest(mod_multivar_cell_age7_skinblood_m, vcovHC(mod_multivar_cell_age7_skinblood_m, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age7_skinblood_m, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age7_skinblood_m, type="HC0"))
+multivar_cell_age7_skinblood_m = data.frame(B_age7skin_cellAdj_m = coef[,1], CI_age7skin_low_cellAdj_m = ci[,1], CI_age7skin_high_cellAdj_m = ci[,2], summary_age7skin_cellAdj_m = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7skin_cellAdj_m = round(coef[,4], 3))
+```
+
+#### Early childhood Horvath EAA, male
+```{r, echo = F}
+multivar_cell_age3_Horvath_m[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Early childhood skin & blood EAA, male
+```{r, echo = F}
+multivar_cell_age3_skinblood_m[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Mid-childhood Horvath EAA, male
+```{r, echo = F}
+multivar_cell_age7_Horvath_m[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+#### Mid-childhood skin & blood EAA, male
+```{r, echo = F}
+multivar_cell_age7_skinblood_m[-1,c(4,5)] %>% kable() %>% kable_styling(font_size = 14) 
+```
+
+### Early and mid-childhood, testing sex interactions 
+```{r,warning=FALSE,message=FALSE,eval= FALSE}
+# Horvath early childhood, preterm
+mod_multivar_cell_age3_Horvath_PertermInt = rlm(AgeAccelerationResidual_age3 ~ female_d*preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3)
+coef = coeftest(mod_multivar_cell_age3_Horvath_PertermInt, vcovHC(mod_multivar_cell_age3_Horvath_PertermInt, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age3_Horvath_PertermInt, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age3_Horvath_PertermInt, type="HC0"))
+multivar_cell_age3_Horvath_PretermInt = data.frame(B_age3Hor_cellAdj_PretermInt = coef[,1], CI_age3Hor_low_cellAdj_PretermInt = ci[,1], CI_age3Hor_high_cellAdj_PretermInt = ci[,2], summary_age3Hor_cellAdj_PretermInt = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3Hor_cellAdj_PretermInt = round(coef[,4], 3))
+#                       B_age3Hor_cellAdj_PretermInt CI_age3Hor_low_cellAdj_PretermInt CI_age3Hor_high_cellAdj_PretermInt summary_age3Hor_cellAdj_PretermInt p_age3Hor_cellAdj_PretermInt
+# female_d1:preterm1                     0.005326243                       -1.76807938                         1.77873187                 0.01 (-1.77, 1.78)                        0.995
+
+# skin & blood early childhood, maternal smoking
+mod_multivar_cell_age3_skinblood_SmkInt = rlm(DNAmAgeSkinBloodClockAdjAge_age3 ~ female_d*smk_preg2 + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3)
+coef = coeftest(mod_multivar_cell_age3_skinblood_SmkInt, vcovHC(mod_multivar_cell_age3_skinblood_SmkInt, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age3_skinblood_SmkInt, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age3_skinblood_SmkInt, type="HC0"))
+multivar_cell_age3_skinblood_SmkInt = data.frame(B_age3skin_cellAdj_SmkInt = coef[,1], CI_age3skin_low_cellAdj_SmkInt = ci[,1], CI_age3skin_high_cellAdj_SmkInt = ci[,2], summary_age3skin_cellAdj_SmkInt = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age3skin_cellAdj_SmkInt = round(coef[,4], 3))
+#                       B_age3skin_cellAdj_SmkInt CI_age3skin_low_cellAdj_SmkInt CI_age3skin_high_cellAdj_SmkInt summary_age3skin_cellAdj_SmkInt p_age3skin_cellAdj_SmkInt
+# female_d1:smk_preg21                0.087936625                    -0.36479754                     0.540670786              0.09 (-0.36, 0.54)                     0.703
+# female_d1:smk_preg22                0.568706673                    -0.04546063                     1.182873979              0.57 (-0.05, 1.18)                     0.070
+
+# Horvath mid-childhood, preterm birth
+mod_multivar_cell_age7_Horvath_PretermInt = rlm(AgeAccelerationResidual_age7 ~ female_d*preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7)
+coef = coeftest(mod_multivar_cell_age7_Horvath_PretermInt, vcovHC(mod_multivar_cell_age7_Horvath_PretermInt, type="HC0"))
+ci = coefci(x = mod_multivar_cell_age7_Horvath_PretermInt, level = 0.95, vcov. = vcovHC(mod_multivar_cell_age7_Horvath_PretermInt, type="HC0"))
+multivar_cell_age7_Horvath_PretermInt = data.frame(B_age7Hor_cellAdj_PretermInt = coef[,1], CI_age7Hor_low_cellAdj_PretermInt = ci[,1], CI_age7Hor_high_cellAdj_PretermInt = ci[,2], summary_age7Hor_cellAdj_PretermInt = paste0(round(coef[,1], 2), ' (', round(ci[,1], 2), ", ", round(ci[,2], 2), ')'), p_age7Hor_cellAdj_PretermInt = round(coef[,4], 3))
+#                       B_age7Hor_cellAdj_PretermInt CI_age7Hor_low_cellAdj_PretermInt CI_age7Hor_high_cellAdj_PretermInt summary_age7Hor_cellAdj_PretermInt p_age7Hor_cellAdj_PretermInt
+# female_d1:preterm1                      0.85887552                       -0.09681895                        1.814569989                  0.86 (-0.1, 1.81)                        0.078
+```
+
+
+## Associations between cord blood Horvath EA and childhoood EAA (Figure 7, Supplemental Table S9)
+```{r,warning=FALSE,message=FALSE,echo= FALSE, eval = F}
+# Early childhood
+# dataframe to store results
+EAassoc_age3 = data.frame(matrix(nrow = 2, ncol = 6))
+colnames(EAassoc_age3) = c('Horvath_B', 'Horvath_CI', 'Horvath_p', 'age3_skinblood_B', 'age3_skinblood_CI', 'age3_skinblood_p')
+rownames(EAassoc_age3) = c('Unadjusted', 'Adjusted')
+
+# Horvath EAA unadjusted
+horvathAge3Fit = rlm(AgeAccelerationResidual_age3 ~ DNAmAge_cord_wks, data = datAge3)
+EAassoc_age3[1,1] = coeftest(horvathAge3Fit, vcovHC(horvathAge3Fit, type="HC0"))[2,1]
+EAassoc_age3[1,2] = paste0('(', round(coefci(x = horvathAge3Fit, level = 0.95, vcov. = vcovHC(horvathAge3Fit, type="HC0"))[2,1], 3), ', ', round(coefci(x = horvathAge3Fit, level = 0.95, vcov. = vcovHC(horvathAge3Fit, type="HC0"))[2,2], 3))
+EAassoc_age3[1,3] = coeftest(horvathAge3Fit, vcovHC(horvathAge3Fit, type="HC0"))[2,4]
+
+# Skin & bood EAA unadjusted
+skinbloodAge3Fit = rlm(DNAmAgeSkinBloodClockAdjAge_age3 ~ DNAmAge_cord_wks, data = datAge3)
+EAassoc_age3[1,4] = coeftest(skinbloodAge3Fit, vcovHC(skinbloodAge3Fit, type="HC0"))[2,1]
+EAassoc_age3[1,5] = paste0('(', round(coefci(x = skinbloodAge3Fit, level = 0.95, vcov. = vcovHC(skinbloodAge3Fit, type="HC0"))[2,1], 3), ', ', round(coefci(x = skinbloodAge3Fit, level = 0.95, vcov. = vcovHC(skinbloodAge3Fit, type="HC0"))[2,2], 3))
+EAassoc_age3[1,6] = coeftest(skinbloodAge3Fit, vcovHC(skinbloodAge3Fit, type="HC0"))[2,4]
+
+# Horvath EAA adjusted
+horvathAge3FitAdj = rlm(AgeAccelerationResidual_age3 ~ DNAmAge_cord_wks + female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3)
+EAassoc_age3[2,1] = coeftest(horvathAge3FitAdj, vcovHC(horvathAge3FitAdj, type="HC0"))[2,1]
+EAassoc_age3[2,2] = paste0('(', round(coefci(x = horvathAge3FitAdj, level = 0.95, vcov. = vcovHC(horvathAge3FitAdj, type="HC0"))[2,1], 3), ', ', round(coefci(x = horvathAge3FitAdj, level = 0.95, vcov. = vcovHC(horvathAge3FitAdj, type="HC0"))[2,2], 3))
+EAassoc_age3[2,3] = coeftest(horvathAge3FitAdj, vcovHC(horvathAge3FitAdj, type="HC0"))[2,4]
+
+# Skin & blood EAA adjusted
+skinbloodAge3FitAdj = rlm(DNAmAgeSkinBloodClockAdjAge_age3 ~ DNAmAge_cord_wks + female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age3 + CD4T_perc_age3 + CD8T_perc_age3 + Neu_perc_age3 + Mono_perc_age3 + NK_perc_age3, data = datAge3)
+EAassoc_age3[2,4] = coeftest(skinbloodAge3FitAdj, vcovHC(skinbloodAge3FitAdj, type="HC0"))[2,1]
+EAassoc_age3[2,5] = paste0('(', round(coefci(x = skinbloodAge3FitAdj, level = 0.95, vcov. = vcovHC(skinbloodAge3FitAdj, type="HC0"))[2,1], 3), ', ', round(coefci(x = skinbloodAge3FitAdj, level = 0.95, vcov. = vcovHC(skinbloodAge3FitAdj, type="HC0"))[2,2], 3))
+EAassoc_age3[2,6] = coeftest(skinbloodAge3FitAdj, vcovHC(skinbloodAge3FitAdj, type="HC0"))[2,4]
+
+
+# Mid-childhood
+# dataframe to store results
+EAassoc_age7 = data.frame(matrix(nrow = 2, ncol = 6))
+colnames(EAassoc_age7) = c('Horvath_B', 'Horvath_CI', 'Horvath_p', 'age3_skinblood_B', 'age3_skinblood_CI', 'age3_skinblood_p')
+rownames(EAassoc_age7) = c('Unadjusted', 'Adjusted')
+
+# Horvath EAA =unadjusted
+horvathAge7Fit = rlm(AgeAccelerationResidual_age7 ~ DNAmAge_cord_wks, data = datAge7)
+EAassoc_age7[1,1] = coeftest(horvathAge7Fit, vcovHC(horvathAge7Fit, type="HC0"))[2,1]
+EAassoc_age7[1,2] = paste0('(', round(coefci(x = horvathAge7Fit, level = 0.95, vcov. = vcovHC(horvathAge7Fit, type="HC0"))[2,1], 3), ', ', round(coefci(x = horvathAge7Fit, level = 0.95, vcov. = vcovHC(horvathAge7Fit, type="HC0"))[2,2], 3))
+EAassoc_age7[1,3] = coeftest(horvathAge7Fit, vcovHC(horvathAge7Fit, type="HC0"))[2,4]
+
+# Skin & bood EAA unadjusted
+skinbloodAge7Fit = rlm(DNAmAgeSkinBloodClockAdjAge_age7 ~ DNAmAge_cord_wks, data = datAge7)
+EAassoc_age7[1,4] = coeftest(skinbloodAge7Fit, vcovHC(skinbloodAge7Fit, type="HC0"))[2,1]
+EAassoc_age7[1,5] = paste0('(', round(coefci(x = skinbloodAge7Fit, level = 0.95, vcov. = vcovHC(skinbloodAge7Fit, type="HC0"))[2,1], 3), ', ', round(coefci(x = skinbloodAge7Fit, level = 0.95, vcov. = vcovHC(skinbloodAge7Fit, type="HC0"))[2,2], 3))
+EAassoc_age7[1,6] = coeftest(skinbloodAge7Fit, vcovHC(skinbloodAge7Fit, type="HC0"))[2,4]
+
+# Horvath EAA adjusted
+horvathAge7FitAdj = rlm(AgeAccelerationResidual_age7 ~ DNAmAge_cord_wks + female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7)
+EAassoc_age7[2,1] = coeftest(horvathAge7FitAdj, vcovHC(horvathAge7FitAdj, type="HC0"))[2,1]
+EAassoc_age7[2,2] = paste0('(', round(coefci(x = horvathAge7FitAdj, level = 0.95, vcov. = vcovHC(horvathAge7FitAdj, type="HC0"))[2,1], 3), ', ', round(coefci(x = horvathAge7FitAdj, level = 0.95, vcov. = vcovHC(horvathAge7FitAdj, type="HC0"))[2,2], 3))
+EAassoc_age7[2,3] = coeftest(horvathAge7FitAdj, vcovHC(horvathAge7FitAdj, type="HC0"))[2,4]
+
+# Skin & blood EAA adjusted
+skinbloodAge3FitAdj = rlm(DNAmAgeSkinBloodClockAdjAge_age7 ~ DNAmAge_cord_wks + female_d + preterm + zvalue_bwt_gage_sex_d + race_child2 + agemom_scale + bmi_scale + coll_grad + smk_preg2 + Bcell_perc_age7 + CD4T_perc_age7 + CD8T_perc_age7 + Neu_perc_age7 + Mono_perc_age7 + NK_perc_age7, data = datAge7)
+EAassoc_age7[2,4] = coeftest(skinbloodAge3FitAdj, vcovHC(skinbloodAge3FitAdj, type="HC0"))[2,1]
+EAassoc_age7[2,5] = paste0('(', round(coefci(x = skinbloodAge3FitAdj, level = 0.95, vcov. = vcovHC(skinbloodAge3FitAdj, type="HC0"))[2,1], 3), ', ', round(coefci(x = skinbloodAge3FitAdj, level = 0.95, vcov. = vcovHC(skinbloodAge3FitAdj, type="HC0"))[2,2], 3))
+EAassoc_age7[2,6] = coeftest(skinbloodAge3FitAdj, vcovHC(skinbloodAge3FitAdj, type="HC0"))[2,4]
+
+
+# 25 vs 75th percentile difference
+predict(horvathAge3Fit, data.frame(DNAmAge_cord_wks = as.vector(quantile(datAge3$DNAmAge_cord_wks, na.rm = T))))
+# -0.61612935 -0.24287596 -0.03876924  0.19236200  1.35717599
+0.19236200 + 0.24287596
+# 0.24287596
+
+predict(horvathAge7Fit, data.frame(DNAmAge_cord_wks = as.vector(quantile(datAge7$DNAmAge_cord_wks, na.rm = T))))
+# -1.0257080 -0.4155203 -0.1781412  0.1228073  1.5271482
+0.1228073 + 0.4155203
+# 0.5383276
+```
+
+### Early childhood 
+```{r, echo = F}
+EAassoc_age3 %>% kable() %>% kable_styling(font_size = 14)
+```
+
+### Mid-childhood 
+```{r, echo = F}
+EAassoc_age7 %>% kable() %>% kable_styling(font_size = 14)
+```
